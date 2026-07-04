@@ -50,6 +50,7 @@ Client ──HTTP──▶ API Gateway ──▶ Lambda (Powertools REST resolve
 
 ```bash
 uv sync                       # install deps from lockfile
+uv run pre-commit install     # enable format + type-check git hook (one-time, per clone)
 uv add aws-lambda-powertools  # add a runtime dependency
 uv add --dev pytest moto      # add a dev dependency
 
