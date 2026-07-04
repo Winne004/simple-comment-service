@@ -1,10 +1,15 @@
 [project]
 name = "simple-comment-service"
 version = "0.1.0"
-description = "Add your description here"
+description = "Serverless comment API: API Gateway + Lambda (Powertools) + DynamoDB"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "aws-lambda-powertools[tracer]>=3.31.0",
+    "boto3>=1.43.40",
+    "pydantic>=2.13.4",
+    "python-ulid>=3.1.0",
+]
 
 [dependency-groups]
 dev = [
@@ -17,4 +22,15 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 addopts = "--cov=src --cov-report=term-missing --cov-fail-under=90"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ty.environment]
+root = ["src"]

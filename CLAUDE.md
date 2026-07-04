@@ -134,21 +134,35 @@ Lets us list everything a user wrote across all posts, newest first, without
 scanning. GSI1 is **overloaded** for vote items too (see Voting) so a user's
 votes across all posts are queryable from the same index.
 
+### GSI2 — comments by depth
+
+| Key      | Value                                        |
+| -------- | -------------------------------------------- |
+| `GSI2PK` | `POST#<postId>`                              |
+| `GSI2SK` | `DEPTH#<zero-padded depth>#<path>`           |
+
+Makes `depth` a real **key condition** for depth-bounded reads (#3, #5, #6, #7)
+instead of a post-read `FilterExpression` — see
+[Depth reads](#depth-reads--implementation) for why and for the query shapes.
+GSI2 is **sparse**: only comment items set `GSI2PK`/`GSI2SK` (posts and votes
+don't), so depth queries never touch non-comment items. `depth` is zero-padded
+to 4 digits in the key so lexical sort matches numeric order.
+
 ### Item attributes
 
 **Comment:** `comment_id` (ULID), `post_id`, `user_id`, `parent_id` (nullable),
 `path`, `depth`, `content`, `created_at`, `updated_at`, `deleted` (bool),
 plus denormalized vote counters `upvotes`, `downvotes`, `score` (all `Number`,
-default `0`), plus `PK`/`SK`/`GSI1PK`/`GSI1SK`.
+default `0`), plus `PK`/`SK`/`GSI1PK`/`GSI1SK`/`GSI2PK`/`GSI2SK`.
 
 **Vote:** `post_id`, `comment_id`, `user_id`, `value` (`+1` or `-1`),
 `created_at`, `updated_at`, plus `PK`/`SK`/`GSI1PK`/`GSI1SK`. A vote's existence
 *is* the record that a user voted; removing a vote **deletes** the item.
 
-`depth` is a **0-based integer** (root comment = `0`). Store it as a plain
-`Number` attribute so DynamoDB comparison operators (`=`, `<=`, `<`) behave
-numerically. If you ever need `depth` inside a **key** (see GSI2 below), encode
-it **zero-padded** (`DEPTH#0003`) so lexical sort matches numeric order.
+`depth` is a **0-based integer** (root comment = `0`). It is stored twice: as a
+plain `Number` attribute (so comparison operators behave numerically) and
+**zero-padded** inside `GSI2SK` (`DEPTH#0003#<path>`, so lexical key sort
+matches numeric order).
 
 ## Access patterns (enumerated)
 
@@ -159,15 +173,15 @@ here first, then to the schema/GSIs — never bolt on a `Scan`.
 | - | ---------------------------------------------------------- | --------- | -------------------------------------------------------------------------------- |
 | 1 | Get post metadata                                          | GetItem   | `PK = POST#<postId>`, `SK = META`                                                |
 | 2 | Get the **entire comment tree** for a post                 | Query     | `PK = POST#<postId>` AND `begins_with(SK, "COMMENT#")`                            |
-| 3 | Get **root / top-level** comments for a post               | Query     | pattern #2, `FilterExpression: depth = 0`                                         |
+| 3 | Get **root / top-level** comments for a post               | Query (GSI2) | `GSI2PK = POST#<postId>` AND `begins_with(GSI2SK, "DEPTH#0000#")`              |
 | 4 | Get a **subtree** rooted at a comment (node + descendants) | Query     | `PK = POST#<postId>` AND `begins_with(SK, "COMMENT#<path>")`                      |
-| 5 | Get **direct replies** (children) of a comment             | Query     | pattern #4, `FilterExpression: depth = <parentDepth> + 1`                         |
-| 6 | Read a tree/subtree **up to a max depth** (threaded view)  | Query     | pattern #2 or #4, `FilterExpression: depth <= <maxDepth>`                         |
-| 7 | Get all comments **at exactly depth N** in a post          | Query     | pattern #2, `FilterExpression: depth = <n>`                                       |
+| 5 | Get **direct replies** (children) of a comment             | Query (GSI2) | `begins_with(GSI2SK, "DEPTH#<parentDepth+1>#<parentPath>#")`                   |
+| 6 | Read a tree/subtree **up to a max depth** (threaded view)  | Query (GSI2) | whole tree: `GSI2SK <= "DEPTH#<maxD>#￿"`; subtree: one #5-style query per level |
+| 7 | Get all comments **at exactly depth N** in a post          | Query (GSI2) | `begins_with(GSI2SK, "DEPTH#<000N>#")`                                          |
 | 8 | Get a single comment by id                                 | GetItem   | `PK = POST#<postId>`, `SK = COMMENT#<path>`                                       |
 | 9 | List all comments by a **user across all trees**, newest first | Query (GSI1) | `GSI1PK = USER#<userId>`, `ScanIndexForward = false`                          |
 |10 | List a user's comments **since a timestamp**               | Query (GSI1) | `GSI1PK = USER#<userId>` AND `GSI1SK > TS#<iso>`                              |
-|11 | List a user's comments **within one post**                 | Query (GSI1) | pattern #9, `FilterExpression: post_id = <postId>` (or add GSI2 if hot)       |
+|11 | List a user's comments **within one post**                 | Query (GSI1) | pattern #9, `FilterExpression: post_id = <postId>` (or add GSI3 if hot)       |
 |12 | Add a comment (root or reply)                              | PutItem   | build path from parent's path + new ULID; set `depth = parentDepth + 1`; `ConditionExpression` parent exists |
 |13 | Soft-delete a comment (preserve replies)                   | UpdateItem| set `deleted = true`, clear `content`; keep item so child paths stay valid        |
 |14 | Edit a comment                                             | UpdateItem| `PK`+`SK`, set `content`, `updated_at`; `ConditionExpression` not `deleted`       |
@@ -180,38 +194,40 @@ here first, then to the schema/GSIs — never bolt on a `Scan`.
   The cost is that a node's path is fixed at creation — we do **not** support
   re-parenting a comment. If re-parenting is ever required, revisit this.
 - **Pattern #11** is served today by filtering GSI1; promote it to its own GSI
-  (`GSI2PK = USER#<u>#POST#<p>`) only if it becomes a hot path.
+  (`GSI3PK = USER#<u>#POST#<p>`) only if it becomes a hot path.
 - Path segments are ULIDs, so siblings are naturally time-ordered and writes
   don't need a read-modify-write to compute an index.
 
-### Depth filters — implementation
+### Depth reads — implementation
 
-Depth-based reads (#3, #5, #6, #7) are **first-class**. Every comment carries a
-numeric `depth`, and depth filtering has two implementations — default to the
-first, escalate to the second only under load:
+Depth-based reads (#3, #5, #6, #7) are **first-class** and are served by
+**GSI2**, where depth is part of the sort key and therefore a real **key
+condition**:
 
-1. **`FilterExpression` on the partition query (default).** Query the tree/
-   subtree by `PK` + `begins_with(SK, …)`, then filter on `depth`. Correct and
-   simple. Trade-off: the filter is applied **after** items are read, so you pay
-   RCUs for the whole matched partition even though the client only sees the
-   filtered rows — and `Limit` counts pre-filter items, so paginate on the
-   `LastEvaluatedKey`, never assume `len(items) == Limit`.
+- Root only: `GSI2PK = POST#<id>` AND `begins_with(GSI2SK, "DEPTH#0000#")`
+- Exactly depth N: `begins_with(GSI2SK, "DEPTH#000N#")`
+- Direct children of a parent: `begins_with(GSI2SK, "DEPTH#<parentDepth+1>#<parentPath>#")`
+  — fixed-length ULID segments guarantee the path prefix can't match a sibling.
+- Whole tree up to max depth D: `GSI2SK <= "DEPTH#000D#￿"` (range read, no filter)
+- Subtree up to max depth D: one direct-children-style query **per level**
+  from the root's depth down to D, stopping at the first empty level (an empty
+  tree level can have nothing below it). Level count is small in practice, and
+  each query reads exactly the comments it returns.
 
-2. **GSI2, depth-indexed (escalation).** If depth reads dominate a large tree and
-   the read amplification hurts, add:
+Why a GSI rather than `FilterExpression: depth <= D` on the partition query:
+DynamoDB applies filters **after** the read, so a filtered query bills RCUs for
+the **whole** matched tree/subtree even when the client only sees one level —
+"read the direct children of a hot parent" would cost the parent's entire
+subtree. GSI2 was promoted from an escalation option to the default because of
+exactly that amplification. The cost is a second GSI (extra write + storage)
+on every comment write.
 
-   | Key      | Value                                        |
-   | -------- | -------------------------------------------- |
-   | `GSI2PK` | `POST#<postId>`                              |
-   | `GSI2SK` | `DEPTH#<zero-padded depth>#<path>`           |
-
-   Then depth becomes a real key condition:
-   - Root only: `GSI2PK = POST#<id>` AND `begins_with(GSI2SK, "DEPTH#0000#")`
-   - Exactly depth N: `begins_with(GSI2SK, "DEPTH#000N#")`
-   - Up to max depth D: `GSI2SK <= "DEPTH#000D#￿"` (range read, no filter)
-
-   Cost: a second GSI (extra write cost + storage). Don't add it pre-emptively —
-   the `FilterExpression` path is the right default for a "simple" service.
+Two behavioral notes:
+- GSI2 returns items in **depth-major** order (all of depth 0, then depth 1, …),
+  not path order. Complete reads are re-sorted into path order in the
+  repository; *paginated* depth-bounded reads keep depth-major page order.
+- `depth` in `GSI2SK` is zero-padded to 4 digits, so keyed depth maxes out at
+  9999 (`keys.MAX_KEYED_DEPTH`); validate user-supplied `max_depth` against it.
 
 **Bounded reads (#6)** are the main reason depth is stored: rendering a threaded
 UI that shows the first N levels and lazy-loads deeper subtrees on demand
@@ -290,7 +306,7 @@ in the handler — same read path, different comparator.
 
 ## Testing conventions
 
-- Mock DynamoDB with **moto**; create the table (with GSI1) in a fixture that
+- Mock DynamoDB with **moto**; create the table (with GSI1 and GSI2) in a fixture that
   mirrors `template.yaml`.
 - Test the repository against the real key/path logic — assert on PK/SK/GSI
   values, not just return objects.
