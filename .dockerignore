@@ -1,0 +1,20 @@
+# Keep the Docker build context small and reproducible.
+.git
+.github
+.claude
+.aws-sam
+.venv
+tests
+htmlcov
+.coverage
+.coverage.*
+.pytest_cache
+__pycache__
+*.py[oc]
+*.egg-info
+build
+dist
+wheels
+README.md
+CLAUDE.md
+samconfig.toml

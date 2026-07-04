@@ -12,7 +12,9 @@ query. Comments support **Reddit-style upvoting/downvoting** with a denormalized
 score (see [Voting](#voting-upvotes--downvotes)).
 
 **Architecture:** API Gateway (HTTP API) → Lambda (Python, AWS Lambda Powertools)
-→ DynamoDB. All infrastructure is defined with **AWS SAM**.
+→ DynamoDB. The Lambda ships as a **container image** (not a zip), built from the
+repo `Dockerfile` on the AWS-provided Python base image. All infrastructure is
+defined with **AWS SAM**.
 
 ```
 Client ──HTTP──▶ API Gateway ──▶ Lambda (Powertools REST resolver) ──▶ DynamoDB
@@ -24,7 +26,8 @@ Client ──HTTP──▶ API Gateway ──▶ Lambda (Powertools REST resolve
 | ------------------ | ---------------------------------------- |
 | Language           | Python 3.13                              |
 | IaC                | AWS SAM (`template.yaml`)                 |
-| Compute            | AWS Lambda                               |
+| Compute            | AWS Lambda (**container image**)         |
+| Lambda packaging   | Docker image (`Dockerfile`) on `public.ecr.aws/lambda/python:3.13` |
 | API                | API Gateway HTTP API                      |
 | Handler framework  | AWS Lambda Powertools for Python         |
 | Data store         | DynamoDB (single-table design)           |
@@ -60,11 +63,18 @@ uv run ty check               # type check
 uv run pytest                 # run tests
 uv run pytest --cov=src --cov-report=term-missing --cov-fail-under=90
 
-sam build                     # build the SAM app
-sam local start-api           # run the API locally
+sam build                     # build the container image (needs Docker running)
+sam local start-api           # run the API locally (invokes the image)
 sam local invoke <Function>   # invoke a single function
-sam deploy --guided           # first deploy
+sam deploy --guided           # first deploy (pushes the image to ECR)
 ```
+
+The Lambda is packaged as a **container image**, so SAM builds and runs it with
+Docker: a local Docker daemon must be running for `sam build`, `sam local ...`,
+and `sam deploy`. On first deploy SAM provisions an ECR repository (via
+`--resolve-image-repos` / the guided prompts) and pushes the image there.
+Dependencies are installed inside the image from `uv.lock` (see the
+`Dockerfile`), so there is no `src/requirements.txt` step for the zip path.
 
 Run `ruff format`, `ruff check`, `ty check`, and the coverage gate before
 considering any change complete.
@@ -73,7 +83,9 @@ considering any change complete.
 
 ```
 .
-├── template.yaml            # AWS SAM template (API GW, Lambda, DynamoDB table + GSIs)
+├── template.yaml            # AWS SAM template (API GW, image Lambda, DynamoDB table + GSIs)
+├── Dockerfile               # Lambda container image (uv-installed deps + src/comments)
+├── .dockerignore            # keeps the Docker build context small
 ├── samconfig.toml           # SAM deploy config
 ├── pyproject.toml           # uv project + ruff/ty/pytest config
 ├── src/

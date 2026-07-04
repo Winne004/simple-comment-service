@@ -6,7 +6,6 @@ Description: >
 
 Globals:
   Function:
-    Runtime: python3.13
     Architectures:
       - arm64
     Timeout: 10
@@ -19,8 +18,7 @@ Resources:
   CommentsFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: src/
-      Handler: comments.app.lambda_handler
+      PackageType: Image
       Environment:
         Variables:
           TABLE_NAME: !Ref CommentsTable
@@ -38,6 +36,10 @@ Resources:
             ApiId: !Ref CommentsApi
             Method: ANY
             Path: /{proxy+}
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: .
+      DockerTag: python3.13-arm64
 
   CommentsTable:
     Type: AWS::DynamoDB::Table
