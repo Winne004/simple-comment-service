@@ -15,8 +15,5 @@ wheels/
 htmlcov/
 .pytest_cache/
 
-# generated for sam build (uv export)
-src/requirements.txt
-
 # SAM
 .aws-sam/
