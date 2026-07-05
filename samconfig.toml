@@ -1,7 +1,8 @@
 version = 0.1
 
 [default.global.parameters]
-stack_name = "simple-comment-service"
+stack_name = "commentsv5"
+region = "eu-west-2"
 
 [default.build.parameters]
 cached = true
@@ -11,9 +12,13 @@ parallel = true
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
+resolve_image_repos = true
 
 [default.sync.parameters]
 watch = true
+template_file = "/Users/jeremycharleswinchester/Developer/simple-comment-service/.claude/worktrees/serene-fermi-da5e17/template.yaml"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-uxxrwzwgyxla"
+dependency_layer = false
 
 [default.local_start_api.parameters]
 warm_containers = "EAGER"
