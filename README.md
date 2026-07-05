@@ -47,3 +47,15 @@ sam build
 sam deploy --guided           # first deploy
 sam local start-api           # run locally
 ```
+
+## Test frontend
+
+A minimal React UI for exercising the API lives in [`frontend/`](frontend/README.md):
+
+```bash
+cd frontend
+npm install
+VITE_API_BASE_URL=http://127.0.0.1:3000 npm run dev
+```
+
+The base URL can also be set via `frontend/.env` or edited live in the UI.

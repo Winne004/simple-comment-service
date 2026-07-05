@@ -48,12 +48,39 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref CommentsTable
+      # One event per real method: OPTIONS must stay unrouted so API Gateway's
+      # automatic CORS preflight response applies (an ANY route would swallow
+      # preflights and forward them to the resolver, which 404s them).
       Events:
-        Api:
+        ApiGet:
           Type: HttpApi
           Properties:
             ApiId: !Ref CommentsApi
-            Method: ANY
+            Method: GET
+            Path: /{proxy+}
+        ApiPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CommentsApi
+            Method: POST
+            Path: /{proxy+}
+        ApiPut:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CommentsApi
+            Method: PUT
+            Path: /{proxy+}
+        ApiPatch:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CommentsApi
+            Method: PATCH
+            Path: /{proxy+}
+        ApiDelete:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CommentsApi
+            Method: DELETE
             Path: /{proxy+}
     Metadata:
       Dockerfile: Dockerfile
