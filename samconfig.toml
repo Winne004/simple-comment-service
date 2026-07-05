@@ -19,6 +19,9 @@ watch = true
 template_file = "/Users/jeremycharleswinchester/Developer/simple-comment-service/.claude/worktrees/serene-fermi-da5e17/template.yaml"
 s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-uxxrwzwgyxla"
 dependency_layer = false
+image_repository = "381491852362.dkr.ecr.eu-west-2.amazonaws.com/winchester-ecr"
 
+[default.sync.parameters.parameter_overrides]
+CorsAllowedOrigins = "http://localhost:5173,http://localhost:5174"
 [default.local_start_api.parameters]
 warm_containers = "EAGER"
