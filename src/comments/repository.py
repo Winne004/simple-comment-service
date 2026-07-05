@@ -7,7 +7,6 @@ keys.py; access patterns are numbered as in CLAUDE.md.
 import base64
 import binascii
 import json
-import os
 from datetime import UTC, datetime
 from typing import Any
 
@@ -27,6 +26,7 @@ from comments.errors import (
     VoteNotFoundError,
 )
 from comments.models import Comment, Post, Vote
+from comments.settings import get_database_settings
 
 
 def _now_iso() -> str:
@@ -498,7 +498,7 @@ def get_repository() -> CommentRepository:
     """Lazy singleton used by the handlers; reset via reset_repository() in tests."""
     global _repository
     if _repository is None:
-        _repository = CommentRepository(os.environ["TABLE_NAME"])
+        _repository = CommentRepository(get_database_settings().table_name)
     return _repository
 
 

@@ -31,6 +31,7 @@ Client ──HTTP──▶ API Gateway ──▶ Lambda (Powertools REST resolve
 | API                | API Gateway HTTP API                      |
 | Handler framework  | AWS Lambda Powertools for Python         |
 | Data store         | DynamoDB (single-table design)           |
+| Configuration      | **pydantic-settings** (`settings.py`)    |
 | Package management  | **uv** (never pip/poetry directly)       |
 | Formatting/linting  | **ruff**                                 |
 | Type checking       | **ty**                                   |
@@ -94,6 +95,7 @@ considering any change complete.
 │       ├── app.py           # Lambda entrypoint; Powertools APIGatewayRestResolver
 │       ├── handlers/        # route handlers (thin)
 │       ├── repository.py    # DynamoDB access — the ONLY module that talks to Dynamo
+│       ├── settings.py      # pydantic-settings classes — the ONLY module that reads env vars
 │       ├── models.py        # pydantic models (Comment, Post) + validation
 │       ├── keys.py          # key/path construction helpers (PK/SK/GSI builders)
 │       └── errors.py        # domain errors mapped to HTTP responses
@@ -105,6 +107,24 @@ considering any change complete.
 Keep the handler layer thin: parse/validate → call repository → serialize. All
 DynamoDB key construction lives in `keys.py`; all reads/writes live in
 `repository.py`. Nothing else should import `boto3`.
+
+## Configuration
+
+All environment configuration is declared in `settings.py` using
+**pydantic-settings** — the single place the code reads environment variables.
+Application code must never touch `os.environ` directly; it goes through a
+cached getter (`get_database_settings()`, `get_observability_settings()`).
+
+- One settings class per **bounded concern**, not one monolithic class:
+  `DatabaseSettings` (env: `TABLE_NAME`), `ObservabilitySettings`
+  (env: `POWERTOOLS_*`). A new concern (e.g. auth, feature flags) gets its own
+  class — do not grow an existing one past its concern.
+- Settings classes are `frozen=True`; instances are cached via `lru_cache`
+  getters. Tests that mutate the environment call `reset_settings()` (an
+  autouse fixture in `tests/unit/test_settings.py` shows the pattern).
+- A new env var is added in three places together: `template.yaml`
+  (`Environment.Variables`), the matching settings class, and
+  `tests/conftest.py`.
 
 ## Data model — DynamoDB single table
 
